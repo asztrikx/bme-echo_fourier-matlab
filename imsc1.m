@@ -1,10 +1,38 @@
-[outp,outpSampleRate] = addeffect("pavarotti_original.wav", "impresp_mono.wav");
-audiowrite('pavarotti_conv3.wav', outp, outpSampleRate);
+%addEffect("pavarotti_original.wav", "impresp_mono.wav", "pavarotti_conv.wav");
+simulateRealTime("pavarotti_original.wav", "impresp_mono.wav", "pavarotti_conv.wav");
 
-%a = audiodevinfo;
-%a.output
+function simulateRealTime(srcInp, srcImpresp, srcOutp)
+    % read
+    [inp, inpSampleRate] = audioread(srcInp);
+    [impresp, imprespSampleRate] = audioread(srcImpresp);
+    
+    % resample
+    inpResampled = resample(inp, imprespSampleRate, inpSampleRate);
+    inpResampledSampleRate = imprespSampleRate;
 
-%addEffectToMic("impresp_mono.wav");
+    % cache FFT of impresp
+    imprespFFT = fft(impresp);
+
+    % convolve chunk by chunk
+    %outp = zeros(1, length(inpResampled) + length(impresp) - 1);
+    outp = zeros(0,1);
+    outpSampleRate = imprespSampleRate;
+
+    chunkSize = 10240;
+    for idx = 1:chunkSize:length(inpResampled)
+        from = idx;
+        to = min(idx + chunkSize - 1, length(inpResampled));
+
+        %outp(from:to) = addEffectToChunk(inpResampled(from:to), impresp);
+        outp = [outp; addEffectToChunk(inpResampled(from:to), imprespFFT, chunkSize)];
+    end
+
+    % rescale
+    outp = rescale(outp, min(inpResampled), max(inpResampled), min(outp), max(outp));
+
+    % write
+    audiowrite(srcOutp, outp, outpSampleRate);
+end
 
 function addEffectToMic(srcImpresp)
     %DELETE THIS
@@ -36,50 +64,65 @@ function addEffectToMic(srcImpresp)
     wind = blackman(buffSize);
     while true
         inbuf = adr(); % order of elements?
-        %resample(inbuf,speakerFs,micFs);
-        
-        % windowing
-        %inbuf = inbuf .* wind;
-        %inbuf = (inbuf' * diag(wind))';
-
-        % convolve
-        outbuf = conv(impresp, inbuf);
-
-        % windowing
-        %outbuf = outbuf .* hamming(length(outbuf));
-
-        adw(inbuf); % order of elements ?
+        adw(addEffectToChunk(inbuf)); % order of elements ?
     end
     %release(deviceReader)
 end
 
-function [outp, outpSampleRate] = addeffect(srcAudio, srcImpresp)
-    % read
-    [inp, inpSampleRate] = audioread(srcAudio);
-    [impresp, imprespSampleRate] = audioread(srcImpresp);
+% chunk and impresp should be at same samplerate
+function chunk = addEffectToChunk(chunk, imprespFFT, chunkSize)
+    % windowing
+    %inbuf = inbuf .* wind;
+    %inbuf = (inbuf' * diag(wind))';
+    
+    %bandwidth of windows function
+    %look at pdfs
+    %correct position in array when multiplying
+    chunkFFT = fft(chunk);
+    wind = hamming(chunkSize);
+    %windFFT = fft(wind);
+    chunkFFT = padd(chunkFFT, chunkSize);
+    chunkFFT = chunkFFT .* imprespFFT(1:chunkSize); % .* windFFT;
+    chunk = real(ifft(chunk));
+    chunk = padd(chunk, chunkSize);
+    chunk = chunk .* wind;
+    
+    % windowing
+    %outbuf = outbuf .* hamming(length(outbuf));
+end
 
-    % check range
-    inpMax = max(inp);
+function addEffect(srcInp, srcImpresp, srcOutp)
+    % read
+    [inp, inpSampleRate] = audioread(srcInp);
+    [impresp, imprespSampleRate] = audioread(srcImpresp);
     
     % resample
     inpResampled = resample(inp, imprespSampleRate, inpSampleRate);
     inpResampledSampleRate = imprespSampleRate;
 
-    % debug
-    %playAudio(inpResampled, inpResampledSampleRate);
-    %playAudio(impresp, imprespSampleRate);
-
     % convolve
     outp = conv(inpResampled, impresp);
     outpSampleRate = imprespSampleRate;
 
-    % check range
-    outpMax = max(outp);
-
     % rescale
-    outp = outp .* (inpMax / outpMax);
+    outp = rescale(outp, min(inpResampled), max(inpResampled), min(outp), max(outp));
 
-    disp("Conv done");
+    % write
+    audiowrite(srcOutp, outp, outpSampleRate);
+end
+
+function data = rescale(data, prevMin, prevMax, currentMin, currentMax)
+    % handles min being positive, max being negative?
+    if -prevMin > prevMax
+        scale = -prevMin / -currentMin;
+    else
+        scale = prevMax / currentMax;
+    end
+    data = data .* scale;
+end
+
+function data = padd(data, size)
+    data = [data; zeros(size - length(data), 1)];
 end
 
 function playAudio(audio, sampleRate)
