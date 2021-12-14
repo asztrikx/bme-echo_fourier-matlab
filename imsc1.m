@@ -1,5 +1,5 @@
-%addEffect("pavarotti_original.wav", "impresp_mono.wav", "pavarotti_conv.wav");
-simulateRealTime("pavarotti_original.wav", "impresp_mono.wav", "pavarotti_conv.wav");
+addEffect("pavarotti_original.wav", "impresp_mono.wav", "pavarotti_conv.wav", true);
+%simulateRealTime("pavarotti_original.wav", "impresp_mono.wav", "pavarotti_conv.wav");
 
 function simulateRealTime(srcInp, srcImpresp, srcOutp)
     % read
@@ -10,22 +10,44 @@ function simulateRealTime(srcInp, srcImpresp, srcOutp)
     inpResampled = resample(inp, imprespSampleRate, inpSampleRate);
     inpResampledSampleRate = imprespSampleRate;
 
-    % cache FFT of impresp
-    imprespFFT = fft(impresp);
+    % length of block size
+    chunkSize = 1024;
 
-    % convolve chunk by chunk
-    %outp = zeros(1, length(inpResampled) + length(impresp) - 1);
+    % length of FFT output
+    % https://www.mathworks.com/help/signal/ref/fftfilt.html
+    nfft = 2^nextpow2(chunkSize + length(impresp) - 1);
+
+    % cache FFT of impresp
+    imprespFFT = fft(impresp, nfft);
+
     outp = zeros(0,1);
     outpSampleRate = imprespSampleRate;
 
-    chunkSize = 10240;
+    % overlap-add algorithm
+
+    % overlap should be at least chunkSize + 1
+    % being multiple of chunkSize makes it easier to work with
+    overlap = zeros(chunkSize * 2, 1);
+    % padding to chunkSize
+    inpResampled = paddingZeroMultiply(inpResampled, chunkSize);
     for idx = 1:chunkSize:length(inpResampled)
         from = idx;
         to = min(idx + chunkSize - 1, length(inpResampled));
+        
+        chunkInp = inpResampled(from:to);
 
-        %outp(from:to) = addEffectToChunk(inpResampled(from:to), impresp);
-        outp = [outp; addEffectToChunk(inpResampled(from:to), imprespFFT, chunkSize)];
+        x = ifft(fft(chunkInp, nfft) .* imprespFFT);
+        chunkOutp = x(1:chunkSize) + overlap(1:chunkSize);
+        overlap = overlap(chunkSize+1:end);
+        xRemainderSize = length(x(chunkSize+1:end));
+        overlap = paddingZero(overlap, xRemainderSize) + x(chunkSize+1:end);
+        overlap = paddingZeroMultiply(overlap, chunkSize);
+
+        outp = [outp; chunkOutp];
     end
+
+    % append remaining overlap
+    outp = [outp; overlap];
 
     % rescale
     outp = rescale(outp, min(inpResampled), max(inpResampled), min(outp), max(outp));
@@ -71,27 +93,21 @@ end
 
 % chunk and impresp should be at same samplerate
 function chunk = addEffectToChunk(chunk, imprespFFT, chunkSize)
-    % windowing
-    %inbuf = inbuf .* wind;
-    %inbuf = (inbuf' * diag(wind))';
     
-    %bandwidth of windows function
-    %look at pdfs
-    %correct position in array when multiplying
-    chunkFFT = fft(chunk);
-    wind = hamming(chunkSize);
-    %windFFT = fft(wind);
-    chunkFFT = padd(chunkFFT, chunkSize);
-    chunkFFT = chunkFFT .* imprespFFT(1:chunkSize); % .* windFFT;
-    chunk = real(ifft(chunk));
-    chunk = padd(chunk, chunkSize);
-    chunk = chunk .* wind;
-    
-    % windowing
-    %outbuf = outbuf .* hamming(length(outbuf));
 end
 
-function addEffect(srcInp, srcImpresp, srcOutp)
+function data = paddingZeroMultiply(data, n)
+    data = [data; zeros(n - mod(length(data), n), 1)];
+end
+
+function data = paddingZero(data, size)
+    if length(data) > size 
+        disp("wrong param");
+    end
+    data = [data; zeros(size - length(data), 1)];
+end
+
+function addEffect(srcInp, srcImpresp, srcOutp, shouldConv)
     % read
     [inp, inpSampleRate] = audioread(srcInp);
     [impresp, imprespSampleRate] = audioread(srcImpresp);
@@ -100,8 +116,19 @@ function addEffect(srcInp, srcImpresp, srcOutp)
     inpResampled = resample(inp, imprespSampleRate, inpSampleRate);
     inpResampledSampleRate = imprespSampleRate;
 
+    % idk
+    inpResampled = [inpResampled; zeros(length(impresp), 1)];
+    impresp = [impresp; zeros(length(inpResampled), 1)];
+
     % convolve
-    outp = conv(inpResampled, impresp);
+    if shouldConv
+        % conv 6min vs 1-2 seconds
+        outp = conv(inpResampled, impresp);
+    else
+        inpResampledFFT = fft(inpResampled, length(inpResampled));
+        imprespFFT = fft(impresp, length(inpResampled));
+        outp = ifft(inpResampledFFT .* imprespFFT);
+    end
     outpSampleRate = imprespSampleRate;
 
     % rescale
@@ -119,10 +146,6 @@ function data = rescale(data, prevMin, prevMax, currentMin, currentMax)
         scale = prevMax / currentMax;
     end
     data = data .* scale;
-end
-
-function data = padd(data, size)
-    data = [data; zeros(size - length(data), 1)];
 end
 
 function playAudio(audio, sampleRate)
