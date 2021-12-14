@@ -1,7 +1,8 @@
 %addEffect("pavarotti_original.wav", "impresp_mono.wav", "pavarotti_conv.wav", false);
-simulateRealTime("pavarotti_original.wav", "impresp_mono.wav", "pavarotti_conv.wav");
+%simulateRealTime("pavarotti_original.wav", "impresp_mono.wav", "pavarotti_conv.wav", 64);
+addEffectToMic("impresp_mono.wav", 1024, 44100);
 
-function simulateRealTime(srcInp, srcImpresp, srcOutp)
+function simulateRealTime(srcInp, srcImpresp, srcOutp, chunkSize)
     % read
     [inp, inpSampleRate] = audioread(srcInp);
     [impresp, imprespSampleRate] = audioread(srcImpresp);
@@ -10,44 +11,40 @@ function simulateRealTime(srcInp, srcImpresp, srcOutp)
     inpResampled = resample(inp, imprespSampleRate, inpSampleRate);
     inpResampledSampleRate = imprespSampleRate;
 
-    % length of block size
-    chunkSize = 1024;
-
-    % length of FFT output
-    % https://www.mathworks.com/help/signal/ref/fftfilt.html
+    % set size to the output of time domain convolution to avoid circular property of ifft
+    % set size to be a power of 2
     nfft = 2^nextpow2(chunkSize + length(impresp) - 1);
 
     % cache FFT of impresp
     imprespFFT = fft(impresp, nfft);
 
+    % outside visibility of outp, overlap
     outp = zeros(0,1);
     outpSampleRate = imprespSampleRate;
+    overlap = zeros(0,1);
 
-    % overlap-add algorithm
+    % padding to chunkSize (easier to handle)
+    inpResampled = paddingZeroMultiple(inpResampled, chunkSize);
 
-    % overlap should be at least chunkSize + 1
-    % being multiple of chunkSize makes it easier to work with
-    overlap = zeros(chunkSize * 2, 1);
-    % padding to chunkSize
-    inpResampled = paddingZeroMultiply(inpResampled, chunkSize);
+    % split to chunks
+    tic
     for idx = 1:chunkSize:length(inpResampled)
         from = idx;
-        to = min(idx + chunkSize - 1, length(inpResampled));
-        
-        chunkInp = inpResampled(from:to);
+        to = idx + chunkSize - 1;
+        chunk = inpResampled(from:to);
 
-        x = ifft(fft(chunkInp, nfft) .* imprespFFT);
-        chunkOutp = x(1:chunkSize) + overlap(1:chunkSize);
-        overlap = overlap(chunkSize+1:end);
-        xRemainderSize = length(x(chunkSize+1:end));
-        overlap = paddingZero(overlap, xRemainderSize) + x(chunkSize+1:end);
-        overlap = paddingZeroMultiply(overlap, chunkSize);
+        [chunkOutp, overlap] = addEffectToChunk(chunk, imprespFFT, nfft, chunkSize, overlap);
 
         outp = [outp; chunkOutp];
     end
+    toc
 
     % append remaining overlap
     outp = [outp; overlap];
+
+    % cut padding
+    outpLength = length(inpResampled) + length(impresp) - 1;
+    outp = outp(1:outpLength);
 
     % rescale
     outp = rescale(outp, min(inpResampled), max(inpResampled), min(outp), max(outp));
@@ -56,47 +53,24 @@ function simulateRealTime(srcInp, srcImpresp, srcOutp)
     audiowrite(srcOutp, outp, outpSampleRate);
 end
 
-function addEffectToMic(srcImpresp)
-    %DELETE THIS
-    fs = 8000;  % to large sample rate?
-    buffSize = 4024; % to small/large? fs=8000=>impresp=12605
-
-    % read
-    [impresp, imprespSampleRate] = audioread(srcImpresp);
-    impresp = resample(impresp, fs, imprespSampleRate);
-    imprespSampleRate = fs;
-    %playAudio(impresp, imprespSampleRate);
-    soundsc(impresp, imprespSampleRate);
-
-    % delete this
-    impresp = ones(length(impresp), 1);
-
-    micFs = 44100;
-    speakerFs = 44100;
-    adr = audioDeviceReader(micFs, buffSize, 'NumChannels', 1);
-    % valid values
-    % ?: "Default"
-    % TV: "HD-Audio Generic: ALC255 Analog (hw:1,0)"
-    % Nothing: "pipewire"
-    % TV: "pulse"
-    adr.Device = "Default";
-    %setup(adr); %  Call setup to reduce the computational load of initialization in an audio stream loop.
-    adw = audioDeviceWriter(speakerFs, 'SupportVariableSizeInput', true, 'BufferSize', buffSize);
-    %inbuf = zeros(buffSize,1);
-    wind = blackman(buffSize);
-    while true
-        inbuf = adr(); % order of elements?
-        adw(addEffectToChunk(inbuf)); % order of elements ?
+% overlap-add algorithm
+function [chunkOutp, overlap] = addEffectToChunk(chunk, imprespFFT, nfft, chunkSize, overlap)
+    if length(overlap) == 0
+        % overlap should be at least chunkSize + 1
+        % being multiple of chunkSize makes it easier to work with
+        overlap = zeros(chunkSize * 2, 1);
     end
-    %release(deviceReader)
+
+    x = ifft(fft(chunk, nfft) .* imprespFFT);
+    chunkOutp = x(1:chunkSize) + overlap(1:chunkSize);
+    overlap = overlap(chunkSize+1:end);
+    xRemainer = x(chunkSize+1:end);
+    xRemainderSize = length(xRemainer);
+    overlap = paddingZero(overlap, xRemainderSize) + xRemainer;
+    overlap = paddingZeroMultiple(overlap, chunkSize);
 end
 
-% chunk and impresp should be at same samplerate
-function chunk = addEffectToChunk(chunk, imprespFFT, chunkSize)
-    
-end
-
-function data = paddingZeroMultiply(data, n)
+function data = paddingZeroMultiple(data, n)
     data = [data; zeros(n - mod(length(data), n), 1)];
 end
 
@@ -107,6 +81,7 @@ function data = paddingZero(data, size)
     data = [data; zeros(size - length(data), 1)];
 end
 
+% final
 function addEffect(srcInp, srcImpresp, srcOutp, shouldConv)
     % read
     [inp, inpSampleRate] = audioread(srcInp);
@@ -119,14 +94,18 @@ function addEffect(srcInp, srcImpresp, srcOutp, shouldConv)
     % convolve
     if shouldConv
         outp = conv(inpResampled, impresp);
-    else    
-        % set size to the output of convolution to avoid circular property of ifft
+    else
+        % set size to the output of time domain convolution to avoid circular property of ifft
+        % set size to be a power of 2
         outpLength = length(inpResampled) + length(impresp) - 1;
         nfft = 2^nextpow2(outpLength);
 
+        % convolution in frequency domain
         inpResampledFFT = fft(inpResampled, nfft);
         imprespFFT = fft(impresp, nfft);
         outp = ifft(inpResampledFFT .* imprespFFT);
+
+        % cut the padding
         outp = outp(1:outpLength);
     end
     outpSampleRate = imprespSampleRate;
@@ -139,7 +118,6 @@ function addEffect(srcInp, srcImpresp, srcOutp, shouldConv)
 end
 
 function data = rescale(data, prevMin, prevMax, currentMin, currentMax)
-    % handles min being positive, max being negative?
     if -prevMin > prevMax
         scale = -prevMin / -currentMin;
     else
@@ -151,4 +129,36 @@ end
 function playAudio(audio, sampleRate)
     player = audioplayer(audio, sampleRate);
     player.playblocking();
+end
+
+function addEffectToMic(srcImpresp, chunkSize, micFs)
+    %DELETE THIS
+%     fs = 8000;  % to large sample rate?
+%     buffSize = 4024; % to small/large? fs=8000=>impresp=12605
+
+    % read
+    [impresp, imprespSampleRate] = audioread(srcImpresp);
+    impresp = resample(impresp, micFs, imprespSampleRate);
+    imprespSampleRate = micFs;
+
+    % set size to the output of time domain convolution to avoid circular property of ifft
+    % set size to be a power of 2
+    nfft = 2^nextpow2(chunkSize + length(impresp) - 1);
+
+    % cache FFT of impresp
+    imprespFFT = fft(impresp, nfft);
+
+    % outside visibility of outp, overlap
+    overlap = zeros(0,1);
+
+    % read from microphone
+    adr = audioDeviceReader(micFs, chunkSize, 'NumChannels', 1);
+    adr.Device = "Default";
+    %setup(adr); %  Call setup to reduce the computational load of initialization in an audio stream loop.
+    adw = audioDeviceWriter(micFs, 'SupportVariableSizeInput', true, 'BufferSize', chunkSize);
+    while true
+        chunk = adr();
+        [chunkOutp, overlap] = addEffectToChunk(chunk, imprespFFT, nfft, chunkSize, overlap);
+        adw(chunkOutp);
+    end
 end
