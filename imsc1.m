@@ -1,5 +1,5 @@
-addEffect("pavarotti_original.wav", "impresp_mono.wav", "pavarotti_conv.wav", true);
-%simulateRealTime("pavarotti_original.wav", "impresp_mono.wav", "pavarotti_conv.wav");
+%addEffect("pavarotti_original.wav", "impresp_mono.wav", "pavarotti_conv.wav", false);
+simulateRealTime("pavarotti_original.wav", "impresp_mono.wav", "pavarotti_conv.wav");
 
 function simulateRealTime(srcInp, srcImpresp, srcOutp)
     % read
@@ -116,18 +116,18 @@ function addEffect(srcInp, srcImpresp, srcOutp, shouldConv)
     inpResampled = resample(inp, imprespSampleRate, inpSampleRate);
     inpResampledSampleRate = imprespSampleRate;
 
-    % idk
-    inpResampled = [inpResampled; zeros(length(impresp), 1)];
-    impresp = [impresp; zeros(length(inpResampled), 1)];
-
     % convolve
     if shouldConv
-        % conv 6min vs 1-2 seconds
         outp = conv(inpResampled, impresp);
-    else
-        inpResampledFFT = fft(inpResampled, length(inpResampled));
-        imprespFFT = fft(impresp, length(inpResampled));
+    else    
+        % set size to the output of convolution to avoid circular property of ifft
+        outpLength = length(inpResampled) + length(impresp) - 1;
+        nfft = 2^nextpow2(outpLength);
+
+        inpResampledFFT = fft(inpResampled, nfft);
+        imprespFFT = fft(impresp, nfft);
         outp = ifft(inpResampledFFT .* imprespFFT);
+        outp = outp(1:outpLength);
     end
     outpSampleRate = imprespSampleRate;
 
