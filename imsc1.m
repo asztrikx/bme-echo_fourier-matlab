@@ -42,7 +42,6 @@ function simulateRealTime(srcInp, srcImpresp, srcOutp, chunkSize)
     toc
 
     % append remaining overlap
-    %overlap = rescaleChunk(chunkSize);
     outp = [outp; overlap];
 
     % cut padding
@@ -85,9 +84,6 @@ function [chunkOutp, overlap] = addEffectToChunk(chunk, imprespFFT, nfft, chunkS
 
     % set output based on convolution and overlap (from previous convolutions)
     chunkOutp = chunkConved(1:chunkSize) + overlap(1:chunkSize);
-
-    % rescale after convolution
-    %chunkOutp = rescaleChunk(chunkOutp, chunkSize);
 
     % remove used overlap part
     overlap = overlap(chunkSize+1:end);
