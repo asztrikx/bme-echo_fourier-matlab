@@ -1,8 +1,8 @@
 clear all;
 
-%addEffect("pavarotti_original.wav", "impresp_mono.wav", "pavarotti_conv.wav", false);
-%simulateRealTime("pavarotti_original.wav", "impresp_mono.wav", "pavarotti_conv.wav", 2048);
-%addEffectToMic("impresp_mono.wav", 2048, 44100);
+%addEffect("pavarotti_original.wav", "impresp.wav", "pavarotti_conv.wav", false);
+%simulateRealTime("pavarotti_original.wav", "impresp.wav", "pavarotti_realtime_simulated.wav", 2048);
+%addEffectToMic("impresp.wav", 2048, 44100);
 
 function simulateRealTime(srcInp, srcImpresp, srcOutp, chunkSize)
     % read

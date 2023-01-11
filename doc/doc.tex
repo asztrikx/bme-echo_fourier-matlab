@@ -93,7 +93,7 @@
 \section*{4-8. feladat: Teljes adatra végzett konvolúció}
 	Miután a fájlokat beolvastam, a bemenetet és az impulzus választ közös frekvenciára hozzam a \textit{resample(data, p, q)} függvény segítségével, ahol az egyes adatokat $\frac{p}{q}$-val szorozza be a függvény. A konvolúciót el lehet végezni idő- és frekvenciatartományban, melyet a \textit{shouldConv}-val lehet állítani. Ezután újraskáláztam az értékeket, hogy a megfelelő értékkészletben legyenek. Ezeknek a működését a Matlab szekcióban lehet megtalálni. Végül \textit{audiowrite(src, data, sampleRate)} függvénnyel kiírtam az eredményt egy wav fájlba\footnote{pavarotti\_conv.wav}.
 	\begin{lstlisting}
-addEffect("pavarotti_original.wav", "echo.wav", "pavarotti_conv.wav", false);
+addEffect("pavarotti_original.wav", "impresp.wav", "pavarotti_conv.wav", false);
 	\end{lstlisting}
 	\lstinputlisting{code/addEffect.m}
 	Érdekes kísérlet volt az időtartományban és a frekvenciatartományban végzett konvolúció közötti időkülönbség. Az impulzus válasz 4 másodperc hosszú volt 48kHZ mintavételezés frekvenciával, az audió meg 3 perc 38 másodperc hosszú. Míg időtartományban számomra közelítőleg 6 perc volt, addig frekvenciatartományban közelítőleg 5 másodperc elvégezni a konvolúciót.
@@ -108,14 +108,14 @@ addEffect("pavarotti_original.wav", "echo.wav", "pavarotti_conv.wav", false);
 	Ennek a feladatnak a megoldásához az overlap add algoritmust használtam. Sajnos a webes matlab nem képes a mikrofon kezelésére és az offline linuxos verzió nem támogatja megbízhatóan az audiokezelést. Emiatt először az előző feladatokban használt zenét szeleteltem fel, mintha realtime érkezne az adat és úgy teszteltem az algoritmus működését\footnote{pavarotti\_realtime\_simulated.wav}. Ezután az overlap algoritmust kiszerveztem egy másik függvénybe, hogy ezt a mikrofont használó megoldás is fel tudja használni. \\
 	A függvények során gyakran egészítek ki a \textit{chunkSize} többbszörösére, mivel alapvetően chunk egységegben dolgozunk, ezzel megszűntetve lekezelendő speciális eseteket a kódolás során. A \textit{simulateRealTime} függvény ezeken kívűl nem tartalmaz újdonságot.
 	\begin{lstlisting}
-simulateRealTime("pavarotti_original.wav", "echo.wav", "pavarotti_realtime_simulated.wav", 2048);
+simulateRealTime("pavarotti_original.wav", "impresp.wav", "pavarotti_realtime_simulated.wav", 2048);
 	\end{lstlisting}
 	\lstinputlisting{code/simulateRealTime.m}
 	Az \textit{addEffectToChunk} függvény alapvetően az overlap add algoritmust hajtja végre. Kiemelendő, hogy első iterációban az \textit{overlap} hossza $0$ lenne, ezért ki kell egészítenünk minimum 1 \textit{chunkSize}-ra. Azonban ha pont 1 \textit{chunkSize} lenne, akkor a felhasznált overlap levágásakor szintén kezelendő szélső eset lenne, így érdemesebb annak a kétszeresére választani a méretet. Ezenkívül akalmazva van a már leírt \textit{rescaleChunk} és a szintén indokolt \textit{paddingZeroMultiple}. \\
 	\lstinputlisting{code/addEffectToChunk.m}
 	Végül találva egy reprodukálható működést megírtam a mikrofon alapú kódot is. Itt eleinte csak az impulzusválaszt olvastam be, majd annak frekvenciatartománybeli értékeit is kiszámoltam, hogy ne kelljen minden bejövő szeletnél újraszámolni. Ezután a beépített Matlab függvényekkel lekértem a mikrofont és a hangszórót leíró eszközöket. Végül a végtelenségig kérek a mikrofontól szeletet, amit átdolgozok az \textit{addEffectToChunk} függvénnyel, majd a hangszórón lejátszom az eredményt.
 	\begin{lstlisting}
-addEffectToMic("echo.wav", 2048, 44100);
+addEffectToMic("impresp.wav", 2048, 44100);
 	\end{lstlisting}
 	\lstinputlisting{code/addEffectToMic.m}
 	Tesztelésem során arra jutottam, hogy adott szeletméret esetén a következők tapasztalhatók az én konfigurációmon: 512 esetén a hang rossz minőségű, 1024 esetén késés figyelhető meg, 2048 egy jó választásnak tűnik, 4096-tól újra elkezd nőni a késés.
